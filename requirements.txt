@@ -1,1 +1,2 @@
 pypinyin>=0.53.0
+PySide6>=6.6

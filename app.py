@@ -13,6 +13,7 @@ from tkinter import colorchooser, filedialog, messagebox
 import books
 from dropfiles import install_drop
 from engine import Session
+from icons import IconSet
 from product import APP_NAME, APP_VERSION, log_path, progress_path
 from texts import build_passage, choose, read_text_file, split_segments
 
@@ -84,6 +85,7 @@ class App:
         self._library_flash_id: str | None = None
         self._shelf_cols = 0
         self._drop_hook: list = []
+        self.icons = IconSet()
         self._menu_open = False
         self._lyric_job = None
         self._lyric_animating = False
@@ -130,10 +132,11 @@ class App:
             highlightthickness=0,
             takefocus=0,
         )
+        self.shelf_button._icon_name = "books"
         self.shelf_button.pack(side="left")
         self.menu_button = tk.Button(
             header,
-            text="···",
+            text="",
             command=self._toggle_menu,
             font=self.font_ui,
             bg=BG,
@@ -148,6 +151,7 @@ class App:
             highlightthickness=0,
             takefocus=0,
         )
+        self.menu_button._icon_name = "dots-three"
         self.menu_button.pack(side="right")
         self.add_button = tk.Button(
             header,
@@ -166,6 +170,7 @@ class App:
             highlightthickness=0,
             takefocus=0,
         )
+        self.add_button._icon_name = "plus"
         self._place_label = tk.Label(
             header,
             textvariable=self.segment_var,
@@ -178,18 +183,18 @@ class App:
         self.menu = tk.Frame(self.root, bg=BG)
         actions = tk.Frame(self.menu, bg=BG)
         actions.pack(fill="x")
-        self.english_button = self._button(actions, "英文", self.use_english)
-        self.chinese_button = self._button(actions, "中文拼音", self.use_chinese)
+        self.english_button = self._button(actions, "英文", self.use_english, "text-aa")
+        self.chinese_button = self._button(actions, "中文拼音", self.use_chinese, "translate")
         self.english_button.pack(side="left", padx=(0, 8))
         self.chinese_button.pack(side="left", padx=(0, 18))
-        for label, command in (
-            ("换一篇", self.next_piece),
-            ("重来", self.restart),
-            ("资料库", self._show_library),
-            ("粘贴文本", self.paste_text),
-            ("设置", self._open_settings),
+        for label, command, icon in (
+            ("换一篇", self.next_piece, "arrow-clockwise"),
+            ("重来", self.restart, "arrow-counter-clockwise"),
+            ("资料库", self._show_library, "books"),
+            ("粘贴文本", self.paste_text, "clipboard-text"),
+            ("设置", self._open_settings, "gear"),
         ):
-            self._button(actions, label, command).pack(side="left", padx=(0, 8))
+            self._button(actions, label, command, icon).pack(side="left", padx=(0, 8))
 
         bottom = tk.Frame(self.root, bg=BG)
         self.bottom = bottom
@@ -389,6 +394,7 @@ class App:
             highlightthickness=0,
             takefocus=0,
         )
+        self.continue_button._icon_name = "book-open"
         self.continue_button.pack(side="right")
         self.library_meta = tk.Label(
             self.library_frame,
@@ -446,6 +452,7 @@ class App:
             highlightthickness=0,
             takefocus=0,
         )
+        self.settings_done._icon_name = "check"
         self.settings_done.pack(side="right")
         self.settings_meta = tk.Label(
             self.settings_frame,
@@ -463,7 +470,7 @@ class App:
         self.settings_canvas.bind("<Configure>", self._on_settings_configure)
         self.settings_body.bind("<Configure>", self._sync_settings_scroll)
 
-    def _button(self, parent: tk.Widget, label: str, command) -> tk.Button:
+    def _button(self, parent: tk.Widget, label: str, command, icon: str | None = None) -> tk.Button:
         button = tk.Button(
             parent,
             text=label,
@@ -481,8 +488,38 @@ class App:
             highlightthickness=0,
             takefocus=0,
         )
+        if icon:
+            button._icon_name = icon
         self._buttons.append(button)
         return button
+
+    def _icon_size(self) -> int:
+        try:
+            dpi = float(self.root.winfo_fpixels("1i"))
+        except tk.TclError:
+            dpi = 96
+        return max(20, round(18 * dpi / 96))
+
+    def _apply_icon(self, widget: tk.Widget, color: str) -> None:
+        name = getattr(widget, "_icon_name", None)
+        if not name:
+            return
+        photo = self.icons.photo(self.root, name, self._icon_size(), color)
+        if photo is None:
+            return
+        widget._icon_ref = photo
+        widget.configure(image=photo, compound="left")
+
+    def _refresh_icons(self) -> None:
+        self._apply_icon(self.menu_button, self._muted)
+        for button in (self.shelf_button, self.add_button, self.continue_button, self.settings_done):
+            self._apply_icon(button, self._fg)
+        for button in self._buttons:
+            self._apply_icon(button, self._fg)
+        mark = self.icons.photo(self.root, "keyboard", self._icon_size() + 10, self._fg)
+        if mark is not None:
+            self._window_icon = mark
+            self.root.iconphoto(True, mark)
 
     def _refocus_later(self, _event=None) -> None:
         if not self._dialog_open:
@@ -931,6 +968,7 @@ class App:
         self.settings_meta.configure(bg=self._bg, fg=self._muted)
         self.settings_canvas.configure(bg=self._bg)
         self.settings_body.configure(bg=self._bg)
+        self._refresh_icons()
         if self._settings_open:
             self._render_settings()
         if self._library_open:
@@ -1355,6 +1393,8 @@ class App:
             highlightthickness=0,
             takefocus=0,
         )
+        pick._icon_name = "file-plus"
+        self._apply_icon(pick, self._fg)
         pick.pack(pady=(8, 0))
 
     def _render_book(self, book: books.Book, column: int, row: int) -> None:
@@ -1456,8 +1496,10 @@ class App:
             return
         menu = tk.Menu(self.root, tearoff=0)
         self._book_popup = menu
-        menu.add_command(label="打开", command=lambda: self._open_book(book_id))
-        menu.add_command(label="从资料库移除", command=lambda: self._remove_book(book))
+        open_icon = self.icons.photo(self.root, "book-open", self._icon_size(), self._fg)
+        remove_icon = self.icons.photo(self.root, "trash", self._icon_size(), self._fg)
+        menu.add_command(label="打开", image=open_icon, compound="left", command=lambda: self._open_book(book_id))
+        menu.add_command(label="从资料库移除", image=remove_icon, compound="left", command=lambda: self._remove_book(book))
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -1855,6 +1897,7 @@ class App:
             bg=ACCENT if selected else self._surface,
             fg=ACCENT_FG if selected else self._fg,
         )
+        self._apply_icon(button, ACCENT_FG if selected else self._fg)
 
     def _show_passage(self) -> None:
         shown = "".join(unit.display for unit in self.passage.units)

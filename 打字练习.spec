@@ -3,6 +3,7 @@
 from PyInstaller.utils.hooks import collect_all
 
 datas, binaries, hiddenimports = collect_all("pypinyin")
+datas = datas + [("assets/icons", "assets/icons")]
 
 a = Analysis(
     ["app.py"],
