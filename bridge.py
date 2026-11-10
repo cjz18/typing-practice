@@ -25,6 +25,8 @@ class Bridge(QObject):
     updated = Signal()
     scroll = Signal()
     shiftReset = Signal()
+    confirmed = Signal(int)
+    mistyped = Signal()
     libraryChanged = Signal()
 
     def __init__(self) -> None:
@@ -47,6 +49,7 @@ class Bridge(QObject):
         self.source_text: str | None = None
         self.last_score: tuple[float, float, int, str] | None = None
         self.scrolling = False
+        self._timer_open = False
         self.dialog = False
         self.session = Session(build_passage(choose("en")), True)
         self.pinyin_font = _load_inter()
@@ -89,18 +92,33 @@ class Bridge(QObject):
             self.menu_open = False
         self.note = ""
         was_finished = self.session.finished
+        confirmed_at: int | None = None
+        mistyped = False
         for char in text:
+            before_index = self.session.index
+            before_typed = self.session.typed
             self.session.press(char)
+            if self.session.error:
+                mistyped = True
+                confirmed_at = None
+            elif self.session.index != before_index or self.session.typed != before_typed:
+                mistyped = False
+                confirmed_at = before_index if self.session.index != before_index else self.session.index
         if not was_finished and self.session.finished:
             self._advance()
-        else:
-            self._publish()
+            return True
+        self._publish()
+        if mistyped:
+            self.mistyped.emit()
+        elif confirmed_at is not None:
+            self.confirmed.emit(confirmed_at)
         return True
 
     def _advance(self) -> None:
         self._capture_score()
         if self.imported is not None and self.import_pos + 1 < len(self.imported):
             self.scrolling = True
+            self._begin_fine_timer()
             self.updated.emit()
             self.scroll.emit()
             return
@@ -131,10 +149,44 @@ class Bridge(QObject):
         if not self.scrolling:
             return
         self.scrolling = False
+        self._end_fine_timer()
         if self.imported is not None and self.import_pos + 1 < len(self.imported):
             self.import_pos += 1
             self._start_sentence(self.imported[self.import_pos])
         self.shiftReset.emit()
+
+    def _cancel_scroll(self) -> None:
+        if not self.scrolling:
+            return
+        self.scrolling = False
+        self._end_fine_timer()
+        self.shiftReset.emit()
+
+    def _begin_fine_timer(self) -> None:
+        if self._timer_open:
+            return
+        import sys
+
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            ctypes.windll.winmm.timeBeginPeriod(1)
+        except (AttributeError, OSError):
+            return
+        self._timer_open = True
+
+    def _end_fine_timer(self) -> None:
+        if not self._timer_open:
+            return
+        self._timer_open = False
+        try:
+            import ctypes
+
+            ctypes.windll.winmm.timeEndPeriod(1)
+        except (AttributeError, OSError):
+            return
 
     def _start_sentence(self, text: str) -> None:
         self.session = Session(build_passage(text), self.check_punct)
@@ -142,6 +194,7 @@ class Bridge(QObject):
         self._publish()
 
     def _start_builtin(self, mode: str) -> None:
+        self._cancel_scroll()
         avoid = self.session.passage.text if self.session.passage.mode == mode else None
         self.imported = None
         self.book_id = None
@@ -212,6 +265,8 @@ class Bridge(QObject):
                 color = self.fg
             elif state == "done":
                 color = self._mix(0.28)
+            elif state == "skip":
+                color = self._mix(0.82)
             else:
                 color = self._mix(0.62)
             text = row["t"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -290,6 +345,7 @@ class Bridge(QObject):
 
     @Slot()
     def restart(self) -> None:
+        self._cancel_scroll()
         self.last_score = None
         self.note = ""
         self.session = Session(self.session.passage, self.check_punct)
@@ -457,6 +513,7 @@ class Bridge(QObject):
             self.note = "没有可练习的文本"
             self.updated.emit()
             return
+        self._cancel_scroll()
         self.imported = segments
         self.import_pos = max(0, min(index, len(segments) - 1))
         self.book_id = book_id
@@ -590,6 +647,7 @@ class Bridge(QObject):
     currentLine = Property(str, lambda self: self.session.passage.text, notify=updated)
     nextLine = Property(str, lambda self: self._line(1), notify=updated)
     afterLine = Property(str, lambda self: self._line(2), notify=updated)
+    tailLine = Property(str, lambda self: self._line(3), notify=updated)
     beforeLine = Property(str, lambda self: self._line(-2), notify=updated)
     chars = Property(list, lambda self: self._chars(), notify=updated)
     currentHtml = Property(str, lambda self: self._current_html(), notify=updated)
